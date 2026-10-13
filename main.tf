@@ -130,7 +130,7 @@ resource "aws_route_table_association" "private" {
 # ===============Private Subnets & Route Tables / Associations==================
 
 # 12. 퍼블릭 웹서버용 보안 그룹 (HTTP, SSH 허용)
-resource "aws_security_group" "web" {
+resource "aws_security_group" "web_sg" {
   name        = "${var.project_name}-web-sg"
   description = "Security group for public web servers"
   vpc_id      = aws_vpc.main.id
@@ -165,7 +165,7 @@ resource "aws_security_group" "web" {
 }
 
 # 13. 프라이빗 내부 서버용 보안 그룹 (웹서버 보안 그룹으로부터의 접근만 허용)
-resource "aws_security_group" "private_db" {
+resource "aws_security_group" "private_db_sg" {
   name        = "${var.project_name}-private-db-sg"
   description = "Security group for private DB/app servers"
   vpc_id      = aws_vpc.main.id
@@ -175,7 +175,7 @@ resource "aws_security_group" "private_db" {
     from_port       = 3306
     to_port         = 3306
     protocol        = "tcp"
-    security_groups = [aws_security_group.web.id]
+    security_groups = [aws_security_group.web_sg.id] # Fixed reference from web to web_sg
   }
 
   egress {
@@ -192,3 +192,48 @@ resource "aws_security_group" "private_db" {
 }
 
 # ===============Security Groups==================
+
+# [Part 11] EC2 Instances Configuration
+
+# 1. AMI 데이터 소스 (가장 최신 Amazon Linux 2023 AMI 조회)
+data "aws_ami" "amazon_linux_2" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-*-x86_64"]
+  }
+}
+
+# 2. 퍼블릭 서브넷에 배치할 웹서버 (Public Web Server)
+resource "aws_instance" "public_web" {
+  ami           = data.aws_ami.amazon_linux_2.id
+  instance_type = "t3.micro" # 프리티어 대상, 비용 최소화
+
+  # 앞서 만든 첫 번째 퍼블릭 서브넷 지정
+  subnet_id                   = aws_subnet.public[0].id
+  vpc_security_group_ids      = [aws_security_group.web_sg.id]
+  associate_public_ip_address = true
+
+  tags = {
+    Name = "project-public-web-server"
+  }
+}
+
+# 3. 프라이빗 서브넷에 배치할 내부 서버 (Private App/DB Server)
+resource "aws_instance" "private_app" {
+  ami           = data.aws_ami.amazon_linux_2.id
+  instance_type = "t3.micro"
+
+  # 앞서 만든 첫 번째 프라이빗 서브넷 지정
+  subnet_id              = aws_subnet.private[0].id
+  vpc_security_group_ids = [aws_security_group.private_db_sg.id]
+
+  # 프라이빗이므로 퍼블릭 IP 부여 안 함
+  associate_public_ip_address = false
+
+  tags = {
+    Name = "project-private-app-server"
+  }
+}
