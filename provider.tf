@@ -1,7 +1,5 @@
-# backend.tf 또는 providers.tf 내부
 terraform {
-  required_version = ">= 1.0.0"
-
+  required_version = ">= 1.5.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -9,12 +7,15 @@ terraform {
     }
   }
 
-  # 원격 백엔드 설정 (S3 + DynamoDB State Locking)
+  # S3 및 DynamoDB 원격 백엔드 설정
   backend "s3" {
-    bucket         = "my-terraform-state-bucket-2026-giil" # 실제 사용할 고유 S3 버킷 이름
-    key            = "vpc/terraform.tfstate"               # S3 내에서 저장될 경로
-    region         = "ap-northeast-2"
-    dynamodb_table = "terraform-lock" # 동시성 제어용 DynamoDB 테이블
-    encrypt        = true
+    bucket         = "my-terraform-state-bucket-2026-giil" # 사용 중인 버킷 이름
+    key            = "vpc/terraform.tfstate"
+    region         = "ap-northeast-2" # 현재 사용 중인 리전 (서울)
+    dynamodb_table = "terraform-lock" # 앞으로 사용할 DB
   }
+}
+
+provider "aws" {
+  region = "ap-northeast-2"
 }

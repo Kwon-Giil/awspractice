@@ -1,4 +1,6 @@
-# 1. VPC 생성
+# ==========================================
+# 1. VPC 및 네트워킹 구성
+# ==========================================
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -9,9 +11,6 @@ resource "aws_vpc" "main" {
   }
 }
 
-# ==============VPC (Virtual Private Cloud)======================
-
-# 2. 인터넷 게이트웨이(IGW) 생성 (외부 통로)
 resource "aws_internet_gateway" "gw" {
   vpc_id = aws_vpc.main.id
 
@@ -20,16 +19,11 @@ resource "aws_internet_gateway" "gw" {
   }
 }
 
-# ===============Internet Gateway (IGW)==================
-
-# 3. AWS 가용 영역(AZ) 목록 조회 데이터소스
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# ===============AWS 가용 영역(AZ) 목록 조회 데이터소스==================
-
-# 4. 퍼블릭 서브넷 생성 (이중화: 2개 AZ 활용)
+# 퍼블릭 서브넷 (이중화)
 resource "aws_subnet" "public" {
   count                   = length(var.public_subnet_cidrs)
   vpc_id                  = aws_vpc.main.id
@@ -42,7 +36,6 @@ resource "aws_subnet" "public" {
   }
 }
 
-# 5. 퍼블릭 라우팅 테이블 생성 (모든 외부 트래픽 0.0.0.0/0을 IGW로 향하게 지정)
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -56,16 +49,13 @@ resource "aws_route_table" "public" {
   }
 }
 
-# 6. 퍼블릭 서브넷과 라우팅 테이블 연결 (Association)
 resource "aws_route_table_association" "public" {
   count          = length(var.public_subnet_cidrs)
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
 
-# ===============Public Subnets (멀티 AZ 이중화)==================
-
-# 7. NAT Gateway용 탄력적 IP (EIP) 생성
+# NAT Gateway 및 EIP (프라이빗 서브넷 아웃바운드용)
 resource "aws_eip" "nat" {
   domain = "vpc"
 
@@ -74,9 +64,6 @@ resource "aws_eip" "nat" {
   }
 }
 
-# ===============Elastic IP (EIP)==================
-
-# 8. NAT Gateway 생성 (첫 번째 퍼블릭 서브넷에 배치)
 resource "aws_nat_gateway" "nat" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public[0].id
@@ -88,9 +75,7 @@ resource "aws_nat_gateway" "nat" {
   depends_on = [aws_internet_gateway.gw]
 }
 
-# ===============NAT Gateway==================
-
-# 9. 프라이빗 서브넷 생성 (이중화: 2개 AZ 활용)
+# 프라이빗 서브넷 (이중화)
 resource "aws_subnet" "private" {
   count             = length(var.private_subnet_cidrs)
   vpc_id            = aws_vpc.main.id
@@ -102,9 +87,6 @@ resource "aws_subnet" "private" {
   }
 }
 
-# ===============Private Subnets==================
-
-# 10. 프라이빗 라우팅 테이블 생성 (외부로 나가는 트래픽을 NAT Gateway로 연결)
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 
@@ -118,18 +100,16 @@ resource "aws_route_table" "private" {
   }
 }
 
-# ===============Public Route Table & Associations==================
-
-# 11. 프라이빗 서브넷과 프라이빗 라우팅 테이블 연결 (Association)
 resource "aws_route_table_association" "private" {
   count          = length(var.private_subnet_cidrs)
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private.id
 }
 
-# ===============Private Subnets & Route Tables / Associations==================
 
-# 12. 퍼블릭 웹서버용 보안 그룹 (HTTP, SSH 허용)
+# ==========================================
+# 2. 보안 그룹 (Security Groups)
+# ==========================================
 resource "aws_security_group" "web_sg" {
   name        = "${var.project_name}-web-sg"
   description = "Security group for public web servers"
@@ -144,7 +124,7 @@ resource "aws_security_group" "web_sg" {
   }
 
   ingress {
-    description = "SSH from anywhere (For lab purpose)"
+    description = "SSH from anywhere"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -164,7 +144,6 @@ resource "aws_security_group" "web_sg" {
   }
 }
 
-# 13. 프라이빗 내부 서버용 보안 그룹 (웹서버 보안 그룹으로부터의 접근만 허용)
 resource "aws_security_group" "private_db_sg" {
   name        = "${var.project_name}-private-db-sg"
   description = "Security group for private DB/app servers"
@@ -175,7 +154,7 @@ resource "aws_security_group" "private_db_sg" {
     from_port       = 3306
     to_port         = 3306
     protocol        = "tcp"
-    security_groups = [aws_security_group.web_sg.id] # Fixed reference from web to web_sg
+    security_groups = [aws_security_group.web_sg.id]
   }
 
   egress {
@@ -191,12 +170,11 @@ resource "aws_security_group" "private_db_sg" {
   }
 }
 
-# ===============Security Groups==================
 
-# [Part 11] EC2 Instances Configuration
-
-# 1. AMI 데이터 소스 (가장 최신 Amazon Linux 2023 AMI 조회)
-data "aws_ami" "amazon_linux_2" {
+# ==========================================
+# 3. EC2 인스턴스 및 Nginx 컨테이너 배포
+# ==========================================
+data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
 
@@ -206,34 +184,38 @@ data "aws_ami" "amazon_linux_2" {
   }
 }
 
-# 2. 퍼블릭 서브넷에 배치할 웹서버 (Public Web Server)
+# 퍼블릭 웹서버 (Docker 설치 및 Nginx 컨테이너 자동 실행)
 resource "aws_instance" "public_web" {
-  ami           = data.aws_ami.amazon_linux_2.id
-  instance_type = "t3.micro" # 프리티어 대상, 비용 최소화
-
-  # 앞서 만든 첫 번째 퍼블릭 서브넷 지정
+  ami                         = data.aws_ami.amazon_linux_2023.id
+  instance_type               = "t3.micro"
   subnet_id                   = aws_subnet.public[0].id
   vpc_security_group_ids      = [aws_security_group.web_sg.id]
   associate_public_ip_address = true
 
+  # 인스턴스 부팅 시 실행될 스크립트 (User Data)
+  user_data = <<-EOF
+              #!/bin/bash
+              dnf update -y
+              dnf install -y docker
+              systemctl start docker
+              systemctl enable docker
+              usermod -a -G docker ec2-user
+              docker run -d -p 80:80 --name web-nginx nginx:latest
+              EOF
+
   tags = {
-    Name = "project-public-web-server"
+    Name = "${var.project_name}-public-web-server"
   }
 }
 
-# 3. 프라이빗 서브넷에 배치할 내부 서버 (Private App/DB Server)
+# 프라이빗 앱 서버
 resource "aws_instance" "private_app" {
-  ami           = data.aws_ami.amazon_linux_2.id
-  instance_type = "t3.micro"
-
-  # 앞서 만든 첫 번째 프라이빗 서브넷 지정
+  ami                    = data.aws_ami.amazon_linux_2023.id
+  instance_type          = "t3.micro"
   subnet_id              = aws_subnet.private[0].id
   vpc_security_group_ids = [aws_security_group.private_db_sg.id]
 
-  # 프라이빗이므로 퍼블릭 IP 부여 안 함
-  associate_public_ip_address = false
-
   tags = {
-    Name = "project-private-app-server"
+    Name = "${var.project_name}-private-app-server"
   }
 }
