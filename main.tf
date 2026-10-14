@@ -157,6 +157,14 @@ resource "aws_security_group" "private_db_sg" {
     security_groups = [aws_security_group.web_sg.id]
   }
 
+  ingress {
+    description     = "Allow SSH from bastion (web security group)"
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.web_sg.id]
+  }
+
   egress {
     description = "Allow all outbound traffic"
     from_port   = 0
@@ -188,6 +196,7 @@ data "aws_ami" "amazon_linux_2023" {
 resource "aws_instance" "public_web" {
   ami                         = data.aws_ami.amazon_linux_2023.id
   instance_type               = "t3.micro"
+  key_name                    = "my-key"
   subnet_id                   = aws_subnet.public[0].id
   vpc_security_group_ids      = [aws_security_group.web_sg.id]
   associate_public_ip_address = true
@@ -212,6 +221,7 @@ resource "aws_instance" "public_web" {
 resource "aws_instance" "private_app" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.micro"
+  key_name               = "my-key"
   subnet_id              = aws_subnet.private[0].id
   vpc_security_group_ids = [aws_security_group.private_db_sg.id]
 
